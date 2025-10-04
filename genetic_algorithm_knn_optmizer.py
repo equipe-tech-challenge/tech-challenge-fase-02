@@ -28,58 +28,42 @@ class GeneticAlgorithmKnnOptimizer:
         n_neighbors = random.randint(1, 20)
         weights = random.choice(['uniform', 'distance'])
         metric = random.choice(['euclidean', 'manhattan', 'minkowski'])
-        algorithm = random.choice(['auto', 'ball_tree', 'kd_tree', 'brute'])
-        leaf_size = random.randint(10, 50)
-        
+       
         return {
             'n_neighbors': n_neighbors,
             'weights': weights,
             'metric': metric,
-            'algorithm': algorithm,
-            'leaf_size': leaf_size
         }
     
     def create_population(self):
         return [self.create_individual() for _ in range(self.population_size)]
     
     def fitness_function(self, individual):
-        try:
-            knn = KNeighborsClassifier(
-                n_neighbors=individual['n_neighbors'],
-                weights=individual['weights'],
-                metric=individual['metric'],
-                algorithm=individual['algorithm'],
-                leaf_size=individual['leaf_size']
-            )
+        knn = KNeighborsClassifier(
+            n_neighbors=individual['n_neighbors'],
+            weights=individual['weights'],
+            metric=individual['metric'])
             
-            pipeline = Pipeline(steps=[
-                ('preprocessor', self.preprocessor),
-                ('classifier', knn)
-            ])
-            
-            pipeline.fit(self.X_train, self.y_train)
-            y_pred = pipeline.predict(self.X_test)
-            
-            accuracy = accuracy_score(self.y_test, y_pred)
-            recall = recall_score(self.y_test, y_pred, average='macro')
-            f1 = f1_score(self.y_test, y_pred, average='macro')
-            
-            fitness = (accuracy * 0.4 + recall * 0.3 + f1 * 0.3)
-            
-            return fitness, {
-                'accuracy': accuracy,
-                'recall': recall,
-                'f1_score': f1,
-                'individual': individual
-            }
-        except Exception as e:
-            return 0.0, {
-                'accuracy': 0.0,
-                'recall': 0.0,
-                'f1_score': 0.0,
-                'individual': individual,
-                'error': str(e)
-            }
+        pipeline = Pipeline(steps=[
+            ('preprocessor', self.preprocessor),
+            ('classifier', knn)
+        ])
+        
+        pipeline.fit(self.X_train, self.y_train)
+        y_pred = pipeline.predict(self.X_test)
+        
+        accuracy = accuracy_score(self.y_test, y_pred)
+        recall = recall_score(self.y_test, y_pred, average='macro')
+        f1 = f1_score(self.y_test, y_pred, average='macro')
+        
+        fitness = (accuracy * 0.4 + recall * 0.3 + f1 * 0.3)
+        
+        return fitness, {
+            'accuracy': accuracy,
+            'recall': recall,
+            'f1_score': f1,
+            'individual': individual
+        }
     
     def tournament_selection(self, population, k=3):
         tournament = random.sample(population, k)
@@ -103,14 +87,6 @@ class GeneticAlgorithmKnnOptimizer:
                 child1['metric'] = parent2['metric']
                 child2['metric'] = parent1['metric']
             
-            if random.random() < 0.5:
-                child1['algorithm'] = parent2['algorithm']
-                child2['algorithm'] = parent1['algorithm']
-            
-            if random.random() < 0.5:
-                child1['leaf_size'] = parent2['leaf_size']
-                child2['leaf_size'] = parent1['leaf_size']
-            
             return child1, child2
         
         return parent1.copy(), parent2.copy()
@@ -127,12 +103,6 @@ class GeneticAlgorithmKnnOptimizer:
             
             if random.random() < 0.2:
                 mutated['metric'] = random.choice(['euclidean', 'manhattan', 'minkowski'])
-            
-            if random.random() < 0.2:
-                mutated['algorithm'] = random.choice(['auto', 'ball_tree', 'kd_tree', 'brute'])
-            
-            if random.random() < 0.2:
-                mutated['leaf_size'] = random.randint(10, 50)
         
         return mutated
     
@@ -198,31 +168,31 @@ class GeneticAlgorithmKnnOptimizer:
     def get_best_parameters_history(self):
         return self.best_individual_history
 
-def run_genetic_experiment(X_train, y_train, X_test, y_test, preprocessor, experiment_number, population_size, generations, mutation_rate, crossover_rate):
-    print(f"EXPERIMENTO: {experiment_number}")
-    
-    optimizer = GeneticAlgorithmKnnOptimizer(
-        X_train, y_train, X_test, y_test, preprocessor,
-        population_size=population_size,
-        generations=generations,
-        mutation_rate=mutation_rate,
-        crossover_rate=crossover_rate
-    )
-    
-    best_params, best_fitness, best_metrics = optimizer.optimize()
-    
-    print(f"\n=== RESULTADO DO KNN OTIMIZADO EXPERIMENTO {experiment_number} ===")
-    print(f"Melhor Fitness: {best_fitness:.4f}")
-    print(f"Melhor Accuracy: {best_metrics['accuracy']:.4f}")
-    print(f"Melhor Recall: {best_metrics['recall']:.4f}")
-    print(f"Melhor F1-Score: {best_metrics['f1_score']:.4f}")
-    print(f"Melhores Parâmetros: {best_params}")
-    
-    return {
-        'experiment_number': experiment_number,
-        'best_params': best_params,
-        'best_fitness': best_fitness,
-        'best_metrics': best_metrics,
-        'fitness_history': optimizer.fitness_history,
-        'optimizer': optimizer
-    }
+    def run_genetic_experiment(X_train, y_train, X_test, y_test, preprocessor, experiment_number, population_size, generations, mutation_rate, crossover_rate):
+        print(f"EXPERIMENTO: {experiment_number}")
+        
+        optimizer = GeneticAlgorithmKnnOptimizer(
+            X_train, y_train, X_test, y_test, preprocessor,
+            population_size=population_size,
+            generations=generations,
+            mutation_rate=mutation_rate,
+            crossover_rate=crossover_rate
+        )
+        
+        best_params, best_fitness, best_metrics = optimizer.optimize()
+        
+        print(f"\n=== RESULTADO DO KNN OTIMIZADO EXPERIMENTO {experiment_number} ===")
+        print(f"Melhor Fitness: {best_fitness:.4f}")
+        print(f"Melhor Accuracy: {best_metrics['accuracy']:.4f}")
+        print(f"Melhor Recall: {best_metrics['recall']:.4f}")
+        print(f"Melhor F1-Score: {best_metrics['f1_score']:.4f}")
+        print(f"Melhores Parâmetros: {best_params}")
+        
+        return {
+            'experiment_number': experiment_number,
+            'best_params': best_params,
+            'best_fitness': best_fitness,
+            'best_metrics': best_metrics,
+            'fitness_history': optimizer.fitness_history,
+            'optimizer': optimizer
+        }

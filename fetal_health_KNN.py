@@ -86,4 +86,4 @@ class FetalHealthKNN:
         
         FetalHealthKNN.show_results(y_test, y_pred_knn, knn_pipeline, X_test, X)
         
-        return X_train, y_train, X_test, y_test, preprocessor, best_k
+        return X_train, y_train, X_test, y_test, preprocessor, X_resampled, y_resampled
