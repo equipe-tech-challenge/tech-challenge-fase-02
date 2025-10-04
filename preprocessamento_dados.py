@@ -4,11 +4,8 @@ from sklearn.preprocessing import StandardScaler
 from imblearn.over_sampling import SMOTE
 import os
 
-
 class PreprocessadorDados:
-    def __init__(self, arquivo_entrada='fetal_health.csv',
-                 tamanho_teste=0.2,
-                 semente_aleatoria=42):
+    def __init__(self, arquivo_entrada='data/fetal_health.csv',tamanho_teste=0.2, semente_aleatoria=42):
         self.arquivo_entrada = arquivo_entrada
         self.tamanho_teste = tamanho_teste
         self.semente_aleatoria = semente_aleatoria
@@ -90,11 +87,11 @@ class PreprocessadorDados:
     def salvar_dados_processados(self, X_train_smote, y_train_smote, X_test, y_test):
         treino = X_train_smote.copy()
         treino['target'] = y_train_smote.values
-        treino.to_csv('fetal_health_treino_smote.csv', index=False)
+        treino.to_csv('data/fetal_health_treino_smote.csv', index=False)
 
         teste = X_test.copy()
         teste['target'] = y_test.values
-        teste.to_csv('fetal_health_teste.csv', index=False)
+        teste.to_csv('data/fetal_health_teste.csv', index=False)
 
         print(f"\nArquivos salvos:")
         print(f"  Treino (com SMOTE): fetal_health_treino_smote.csv - {treino.shape}")
@@ -130,8 +127,8 @@ class PreprocessadorDados:
 
 def verificar_e_processar_dados():
     arquivos_necessarios = [
-        'fetal_health_treino_smote.csv',
-        'fetal_health_teste.csv'
+        'data/fetal_health_treino_smote.csv',
+        'data/fetal_health_teste.csv'
     ]
 
     if all(os.path.exists(arq) for arq in arquivos_necessarios):
@@ -141,7 +138,7 @@ def verificar_e_processar_dados():
     preprocessador = PreprocessadorDados()
     preprocessador.executar_preprocessamento()
 
-    return all(os.path.exists(arq) for arq in arquivos_necessarios)
+    return all(os.path.exists(arq) for arq in arquivos_necessarios) 
 
 
 if __name__ == "__main__":

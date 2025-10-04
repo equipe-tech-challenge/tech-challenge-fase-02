@@ -3,9 +3,8 @@ import numpy as np
 from fetal_health_KNN import FetalHealthKNN
 
 
-class AlgoritmoGenetico:
-    def __init__(self, tamanho_populacao=100, taxa_mutacao=0.7, taxa_crossover=0.8,
-                 geracoes=500, elitismo=2):
+class AlgoritmoGeneticoOtimizadorKnn:
+    def __init__(self, tamanho_populacao=100, taxa_mutacao=0.7, taxa_crossover=0.8, geracoes=500, elitismo=2):
         self.tamanho_populacao = tamanho_populacao
         self.taxa_mutacao = taxa_mutacao
         self.taxa_crossover = taxa_crossover
@@ -138,11 +137,10 @@ class AlgoritmoGenetico:
         print(f"\nMelhor Fitness (Acurácia): {self.melhor_fitness:.4f}")
         print("=" * 60)
 
-
 if __name__ == "__main__":
     print("Executando Algoritmo Genético para Otimização de Parâmetros KNN\n")
 
-    ag = AlgoritmoGenetico(
+    ag = AlgoritmoGeneticoOtimizadorKnn(
         tamanho_populacao=20,
         taxa_mutacao=0.5,
         taxa_crossover=0.8,

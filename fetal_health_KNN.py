@@ -1,167 +1,122 @@
 import pandas as pd
+import matplotlib.pyplot as plt
+import seaborn as sns
+from sklearn.pipeline import Pipeline
+from sklearn.preprocessing import StandardScaler
+from sklearn.compose import ColumnTransformer
+from sklearn.model_selection import train_test_split
+from sklearn.metrics import classification_report, accuracy_score, recall_score, confusion_matrix, f1_score
 from sklearn.neighbors import KNeighborsClassifier
-from sklearn.metrics import accuracy_score, recall_score, f1_score, confusion_matrix, classification_report
-import os
-from preprocessamento_dados import verificar_e_processar_dados
+import numpy as np
+from imblearn.over_sampling import SMOTE
 
-class FetalHealthKNN:
-    def __init__(self, n_vizinhos=3, metrica='euclidean', peso='uniform'):
-        self.n_vizinhos = n_vizinhos
-        self.metrica = metrica
-        self.peso = peso
 
-        self.modelo = None
-        self.X_treino = None
-        self.X_teste = None
-        self.y_treino = None
-        self.y_teste = None
-        self.y_predicao = None
-        self.metricas_desempenho = {}
+def data_treatment():
+    df = pd.read_csv('data/fetal_health.csv')
+    print(f"Dataset carregado: {df.shape}")
+    
+    print("\nDados nulos:")
+    print(df.isnull().sum())
+    
+    print(f"\nDados duplicados antes da remoção: {df.duplicated().sum()}")
+    
+    df = df.drop_duplicates()
+    print(f"Dados duplicados após remoção: {df.duplicated().sum()}")
+    print(f"Shape após limpeza: {df.shape}")
+    
+    df = df.rename(columns={'fetal_health': 'target'})
+    
+    print(f"\nShape (linhas, colunas): {df.shape}")
+    print(f"\nTipos de dados:\n{df.dtypes}")
+    
+    print(f"\nInformações do dataset:")
+    df.info()
+    
+    return df
 
-        self._verificar_e_carregar_dados()
+def data_preprocessing(df):    
+    X = df.drop("target", axis=1)
+    y = df["target"]
+    
+    print(f"Features (X): {X.shape}")
+    print(f"Target (y): {y.shape}")
+    
+    x_columns = X.columns.tolist()
+    
+    preprocessor = ColumnTransformer(transformers=[
+        ('num', StandardScaler(), x_columns)
+    ])
+    
+    X_train, X_test, y_train, y_test = train_test_split(X, y, stratify=y, test_size=0.2, random_state=42)
+    print(f"\nSplit dos dados:")
+    print(f"X_train: {X_train.shape}, y_train: {y_train.shape}")
+    print(f"X_test: {X_test.shape}, y_test: {y_test.shape}")
+    
+    smote = SMOTE()
+    X_resampled, y_resampled = smote.fit_resample(X_train, y_train)
+    
+    print(f"\nApós SMOTE:")
+    print(f"X_resampled: {X_resampled.shape}, y_resampled: {y_resampled.shape}")
+    
+    contagem = y_resampled.value_counts().sort_index()
+    
+    return X, y, X_train, X_test, y_train, y_test, X_resampled, y_resampled, preprocessor
 
-    def _verificar_e_carregar_dados(self):
-        verificar_e_processar_dados()
-        self._carregar_dados()
+def knn_configuration(X_resampled, y_resampled, X_test, y_test):    
+    error = []
+    
+    for i in range(1, 10):
+        knn = KNeighborsClassifier(n_neighbors=i)
+        knn.fit(X_resampled, y_resampled)
+        pred_i = knn.predict(X_test)
+        error.append(np.mean(pred_i != y_test))
+        
+    best_k = np.argmin(error) + 1
+    print(f"Melhor valor de K encontrado: {best_k}")
+    print(f"Erro mínimo: {min(error):.4f}")
+    
+    return best_k
 
-    def _carregar_dados(self):
-        arquivo_treino = 'fetal_health_treino_smote.csv'
-        arquivo_teste = 'fetal_health_teste.csv'
+def train_test_knn(X_resampled, y_resampled, X_test, y_test, preprocessor, best_k):    
+    knn_pipeline = Pipeline(steps=[
+        ('preprocessor', preprocessor),
+        ('classifier', KNeighborsClassifier(n_neighbors=best_k))
+    ])
+    
+    knn_pipeline.fit(X_resampled, y_resampled)
+    print("Modelo treinado com sucesso!")
+    
+    y_pred_knn = knn_pipeline.predict(X_test)
+    print("Predições realizadas no conjunto de teste!")
+    
+    return knn_pipeline, y_pred_knn
 
-        if not os.path.exists(arquivo_treino) or not os.path.exists(arquivo_teste):
-            preprocessador = verificar_e_processar_dados.PreprocessadorDados()
-            preprocessador.executar_preprocessamento()
+def show_results(y_test, y_pred_knn, knn_pipeline, X_test, X):    
+    accuracy_knn = accuracy_score(y_test, y_pred_knn)
+    recall_knn = recall_score(y_test, y_pred_knn, average='macro')
+    f1_knn = f1_score(y_test, y_pred_knn, average='macro')
+    
+    print(f"Acurácia com KNN: {accuracy_knn:.4f}")
+    print(f"Taxa de verdadeiro positivo (Recall) com KNN: {recall_knn:.4f}")
+    print(f"F1-score com KNN: {f1_knn:.4f}")
+    
+    knn_report = classification_report(y_test, y_pred_knn)
+    print(f"\nRelatório de Classificação KNN:\n{knn_report}")
 
-            if not os.path.exists(arquivo_treino) or not os.path.exists(arquivo_teste):
-                raise FileNotFoundError("Erro ao gerar arquivos processados")
 
-        treino = pd.read_csv(arquivo_treino)
-        self.X_treino = treino.drop('target', axis=1)
-        self.y_treino = treino['target']
-
-        teste = pd.read_csv(arquivo_teste)
-        self.X_teste = teste.drop('target', axis=1)
-        self.y_teste = teste['target']
-
-    def criar_modelo(self):
-        self.modelo = KNeighborsClassifier(
-            n_neighbors=self.n_vizinhos,
-            metric=self.metrica,
-            weights=self.peso
-        )
-        return self.modelo
-
-    def treinar_modelo(self):
-        if self.modelo is None:
-            self.criar_modelo()
-
-        self.modelo.fit(self.X_treino, self.y_treino)
-        return self.modelo
-
-    def realizar_predicao(self):
-        if self.modelo is None:
-            raise ValueError("Modelo não foi treinado. Execute treinar_modelo() primeiro.")
-
-        self.y_predicao = self.modelo.predict(self.X_teste)
-        return self.y_predicao
-
-    def calcular_metricas(self):
-        if self.y_predicao is None:
-            self.realizar_predicao()
-
-        self.metricas_desempenho = {
-            'acuracia': accuracy_score(self.y_teste, self.y_predicao),
-            'recall': recall_score(self.y_teste, self.y_predicao, average='macro'),
-            'f1_score': f1_score(self.y_teste, self.y_predicao, average='macro')
-        }
-
-        return self.metricas_desempenho
-
-    def obter_matriz_confusao(self):
-        if self.y_predicao is None:
-            self.realizar_predicao()
-
-        return confusion_matrix(self.y_teste, self.y_predicao)
-
-    def obter_relatorio_classificacao(self):
-        if self.y_predicao is None:
-            self.realizar_predicao()
-
-        return classification_report(self.y_teste, self.y_predicao)
-
-    def calcular_fitness(self, peso_acuracia=0.5, peso_f1=0.3, peso_recall=0.2, penalizar_complexidade=True):
-        if not self.metricas_desempenho:
-            self.calcular_metricas()
-
-        fitness = (
-            self.metricas_desempenho['acuracia'] * peso_acuracia +
-            self.metricas_desempenho['f1_score'] * peso_f1 +
-            self.metricas_desempenho['recall'] * peso_recall
-        )
-
-        # Penaliza modelos com muitos vizinhos (0-5% de redução)
-        if penalizar_complexidade:
-            penalidade = (self.n_vizinhos - 1) / 200  # máx 9.5% para k=20
-            fitness *= (1 - penalidade)
-
-        return fitness
-
-    def calcular_fitness_ponderado(self, peso_acuracia=0.5, peso_f1=0.3, peso_recall=0.2):
-        return self.calcular_fitness(peso_acuracia, peso_f1, peso_recall, penalizar_complexidade=False)
-
-    def executar_pipeline_completo(self):
-        self.treinar_modelo()
-        self.realizar_predicao()
-
-        metricas = self.calcular_metricas()
-        matriz = self.obter_matriz_confusao()
-        relatorio = self.obter_relatorio_classificacao()
-
-        return {
-            'metricas': metricas,
-            'matriz_confusao': matriz,
-            'relatorio_classificacao': relatorio,
-            'fitness': self.calcular_fitness(),
-            'parametros': {
-                'n_vizinhos': self.n_vizinhos,
-                'metrica': self.metrica,
-                'peso': self.peso
-            }
-        }
-
-    def exibir_resultados(self):
-        """
-        Summary:
-            Exibe os resultados do modelo de forma formatada.
-        """
-        resultados = self.executar_pipeline_completo()
-
-        print(f"Acurácia: {resultados['metricas']['acuracia']:.4f}, Recall: {resultados['metricas']['recall']:.4f}, F1-Score: {resultados['metricas']['f1_score']:.4f}")
-
-        return resultados
-
-    def atualizar_parametros(self, n_vizinhos=None, metrica=None, peso=None):
-        if n_vizinhos is not None:
-            self.n_vizinhos = n_vizinhos
-
-        if metrica is not None:
-            self.metrica = metrica
-
-        if peso is not None:
-            self.peso = peso
-
-        self.criar_modelo()
-
+def main():
+    print("=== ANÁLISE DE SAÚDE FETAL COM KNN ===\n")
+    
+    df = data_treatment()
+        
+    X, y, X_train, X_test, y_train, y_test, X_resampled, y_resampled, preprocessor = data_preprocessing(df)
+    
+    best_k = knn_configuration(X_resampled, y_resampled, X_test, y_test)
+    
+    knn_pipeline, y_pred_knn = train_test_knn(X_resampled, y_resampled, X_test, y_test, preprocessor, best_k)
+    
+    show_results(y_test, y_pred_knn, knn_pipeline, X_test, X)
+    
 
 if __name__ == "__main__":
-    modelo_knn = FetalHealthKNN(n_vizinhos=3, metrica='minkowski', peso='uniform')
-    modelo_knn.exibir_resultados()
-
-    configuracoes = [
-        {'n_vizinhos': 4, 'metrica': 'manhattan', 'peso': 'distance'},
-    ]
-
-    for i, config in enumerate(configuracoes, 1):
-        modelo = FetalHealthKNN(**config)
-        modelo.treinar_modelo()
-        fitness = modelo.calcular_fitness()
+    main()
