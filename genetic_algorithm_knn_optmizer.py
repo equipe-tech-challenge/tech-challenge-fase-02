@@ -5,15 +5,18 @@ from sklearn.pipeline import Pipeline
 from sklearn.metrics import accuracy_score, recall_score, f1_score
 from sklearn.model_selection import cross_val_score
 import matplotlib.pyplot as plt
+from fetal_health_KNN import FetalHealthKNN
 
 class GeneticAlgorithmKnnOptimizer:
-    def __init__(self, X_train, y_train, X_test, y_test, preprocessor, population_size=30, generations=20, mutation_rate=0.1, crossover_rate=0.8, elite_size=2):
+    def __init__(self, X_train, y_train, X_test, y_test, preprocessor, X_resampled, y_resampled, population_size=30, generations=20, mutation_rate=0.1, crossover_rate=0.8, elite_size=2):
 
         self.X_train = X_train
         self.y_train = y_train
         self.X_test = X_test
         self.y_test = y_test
         self.preprocessor = preprocessor
+        self.X_resampled = X_resampled
+        self.y_resampled = y_resampled
         
         self.population_size = population_size
         self.generations = generations
@@ -39,22 +42,13 @@ class GeneticAlgorithmKnnOptimizer:
         return [self.create_individual() for _ in range(self.population_size)]
     
     def fitness_function(self, individual):
-        knn = KNeighborsClassifier(
+        # Usa a função do fetal_health_KNN.py para avaliar os parâmetros
+        accuracy, recall, f1, knn_report, y_pred, y_test = FetalHealthKNN.run_fetal_health_knn(
+            self.X_resampled, self.y_resampled, self.X_test, self.y_test, self.preprocessor,
             n_neighbors=individual['n_neighbors'],
             weights=individual['weights'],
-            metric=individual['metric'])
-            
-        pipeline = Pipeline(steps=[
-            ('preprocessor', self.preprocessor),
-            ('classifier', knn)
-        ])
-        
-        pipeline.fit(self.X_train, self.y_train)
-        y_pred = pipeline.predict(self.X_test)
-        
-        accuracy = accuracy_score(self.y_test, y_pred)
-        recall = recall_score(self.y_test, y_pred, average='macro')
-        f1 = f1_score(self.y_test, y_pred, average='macro')
+            metric=individual['metric']
+        )
         
         fitness = (accuracy * 0.4 + recall * 0.3 + f1 * 0.3)
         
@@ -168,11 +162,11 @@ class GeneticAlgorithmKnnOptimizer:
     def get_best_parameters_history(self):
         return self.best_individual_history
 
-    def run_genetic_experiment(X_train, y_train, X_test, y_test, preprocessor, experiment_number, population_size, generations, mutation_rate, crossover_rate):
+    def run_genetic_experiment(X_train, y_train, X_test, y_test, preprocessor, X_resampled, y_resampled, experiment_number, population_size, generations, mutation_rate, crossover_rate):
         print(f"EXPERIMENTO: {experiment_number}")
         
         optimizer = GeneticAlgorithmKnnOptimizer(
-            X_train, y_train, X_test, y_test, preprocessor,
+            X_train, y_train, X_test, y_test, preprocessor, X_resampled, y_resampled,
             population_size=population_size,
             generations=generations,
             mutation_rate=mutation_rate,
@@ -187,7 +181,8 @@ class GeneticAlgorithmKnnOptimizer:
         print(f"Melhor Recall: {best_metrics['recall']:.4f}")
         print(f"Melhor F1-Score: {best_metrics['f1_score']:.4f}")
         print(f"Melhores Parâmetros: {best_params}")
-        
+        print(f"\n")
+
         return {
             'experiment_number': experiment_number,
             'best_params': best_params,

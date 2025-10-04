@@ -52,10 +52,18 @@ class FetalHealthKNN:
         
         return best_k
 
-    def train_test_knn(X_resampled, y_resampled, X_test, y_test, preprocessor, best_k):    
+    def train_test_knn(X_resampled, y_resampled, X_test, y_test, preprocessor, n_neighbors=None, weights='uniform', metric='euclidean'):    
+        if n_neighbors is None:
+            best_k = FetalHealthKNN.knn_configuration(X_resampled, y_resampled, X_test, y_test)
+            n_neighbors = best_k
+        
         knn_pipeline = Pipeline(steps=[
             ('preprocessor', preprocessor),
-            ('classifier', KNeighborsClassifier(n_neighbors=best_k))
+            ('classifier', KNeighborsClassifier(
+                n_neighbors=n_neighbors,
+                weights=weights,
+                metric=metric
+            ))
         ])
         
         knn_pipeline.fit(X_resampled, y_resampled)    
@@ -63,11 +71,7 @@ class FetalHealthKNN:
         
         return knn_pipeline, y_pred_knn
 
-    def show_results(y_test, y_pred_knn, knn_pipeline, X_test, X):    
-        accuracy_knn = accuracy_score(y_test, y_pred_knn)
-        recall_knn = recall_score(y_test, y_pred_knn, average='macro')
-        f1_knn = f1_score(y_test, y_pred_knn, average='macro')
-        
+    def show_results(accuracy_knn, recall_knn, f1_knn, knn_report, y_pred_knn, y_test):    
         print(f"Acurácia com KNN: {accuracy_knn:.4f}")
         print(f"Taxa de verdadeiro positivo (Recall) com KNN: {recall_knn:.4f}")
         print(f"F1-score com KNN: {f1_knn:.4f}")
@@ -75,15 +79,17 @@ class FetalHealthKNN:
         knn_report = classification_report(y_test, y_pred_knn)
         print(f"\nRelatório de Classificação KNN:\n{knn_report}")
 
-    def run_fetal_health_knn():       
-        df = FetalHealthKNN.data_treatment()
+    def run_fetal_health_knn(X_resampled, y_resampled, X_test, y_test, preprocessor, n_neighbors=None, weights='uniform', metric='euclidean'):       
+        #df = FetalHealthKNN.data_treatment()
          
-        X, y, X_train, X_test, y_train, y_test, X_resampled, y_resampled, preprocessor = FetalHealthKNN.data_preprocessing(df)
+        #X, y, X_train, X_test, y_train, y_test, X_resampled, y_resampled, preprocessor = FetalHealthKNN.data_preprocessing(df)
         
-        best_k = FetalHealthKNN.knn_configuration(X_resampled, y_resampled, X_test, y_test)
+        knn_pipeline, y_pred_knn = FetalHealthKNN.train_test_knn(X_resampled, y_resampled, X_test, y_test, preprocessor, n_neighbors, weights, metric)
         
-        knn_pipeline, y_pred_knn = FetalHealthKNN.train_test_knn(X_resampled, y_resampled, X_test, y_test, preprocessor, best_k)
+        accuracy_knn = accuracy_score(y_test, y_pred_knn)
+        recall_knn = recall_score(y_test, y_pred_knn, average='macro')
+        f1_knn = f1_score(y_test, y_pred_knn, average='macro')
+        knn_report = classification_report(y_test, y_pred_knn)
         
-        FetalHealthKNN.show_results(y_test, y_pred_knn, knn_pipeline, X_test, X)
-        
-        return X_train, y_train, X_test, y_test, preprocessor, X_resampled, y_resampled
+        return accuracy_knn, recall_knn, f1_knn, knn_report, y_pred_knn, y_test
+    
