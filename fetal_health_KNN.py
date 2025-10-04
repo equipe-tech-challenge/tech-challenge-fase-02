@@ -79,11 +79,7 @@ class FetalHealthKNN:
         knn_report = classification_report(y_test, y_pred_knn)
         print(f"\nRelatório de Classificação KNN:\n{knn_report}")
 
-    def run_fetal_health_knn(X_resampled, y_resampled, X_test, y_test, preprocessor, n_neighbors=None, weights='uniform', metric='euclidean'):       
-        #df = FetalHealthKNN.data_treatment()
-         
-        #X, y, X_train, X_test, y_train, y_test, X_resampled, y_resampled, preprocessor = FetalHealthKNN.data_preprocessing(df)
-        
+    def run_fetal_health_knn(X_resampled, y_resampled, X_test, y_test, preprocessor, n_neighbors=None, weights='uniform', metric='euclidean'):               
         knn_pipeline, y_pred_knn = FetalHealthKNN.train_test_knn(X_resampled, y_resampled, X_test, y_test, preprocessor, n_neighbors, weights, metric)
         
         accuracy_knn = accuracy_score(y_test, y_pred_knn)

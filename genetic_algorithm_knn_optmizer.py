@@ -8,7 +8,20 @@ import matplotlib.pyplot as plt
 from fetal_health_KNN import FetalHealthKNN
 
 class GeneticAlgorithmKnnOptimizer:
-    def __init__(self, X_train, y_train, X_test, y_test, preprocessor, X_resampled, y_resampled, population_size=30, generations=20, mutation_rate=0.1, crossover_rate=0.8, elite_size=2):
+    def __init__(
+        self, 
+        X_train, 
+        y_train, 
+        X_test,
+        y_test, 
+        preprocessor, 
+        X_resampled, 
+        y_resampled, 
+        population_size=30, 
+        generations=20, 
+        mutation_rate=0.1, 
+        crossover_rate=0.8, 
+        elite_size=2):
 
         self.X_train = X_train
         self.y_train = y_train
@@ -24,8 +37,8 @@ class GeneticAlgorithmKnnOptimizer:
         self.crossover_rate = crossover_rate
         self.elite_size = elite_size
         
-        self.fitness_history = []
-        self.best_individual_history = []
+        self.fitness_history = [] #lista para armazenar o histórico da melhor fitness
+        self.best_individual_history = [] #lista para armazenar o histórico da melhor indivíduo
         
     def create_individual(self):
         n_neighbors = random.randint(1, 20)
@@ -44,7 +57,11 @@ class GeneticAlgorithmKnnOptimizer:
     def fitness_function(self, individual):
         # Usa a função do fetal_health_KNN.py para avaliar os parâmetros
         accuracy, recall, f1, knn_report, y_pred, y_test = FetalHealthKNN.run_fetal_health_knn(
-            self.X_resampled, self.y_resampled, self.X_test, self.y_test, self.preprocessor,
+            self.X_resampled, 
+            self.y_resampled, 
+            self.X_test, 
+            self.y_test, 
+            self.preprocessor,
             n_neighbors=individual['n_neighbors'],
             weights=individual['weights'],
             metric=individual['metric']
@@ -159,10 +176,19 @@ class GeneticAlgorithmKnnOptimizer:
         
         return best_final['individual'], best_final['fitness'], best_final['metrics']
     
-    def get_best_parameters_history(self):
-        return self.best_individual_history
-
-    def run_genetic_experiment(X_train, y_train, X_test, y_test, preprocessor, X_resampled, y_resampled, experiment_number, population_size, generations, mutation_rate, crossover_rate):
+    def run_genetic_experiment(
+        X_train, 
+        y_train, 
+        X_test, 
+        y_test, 
+        preprocessor, 
+        X_resampled, 
+        y_resampled, 
+        experiment_number, 
+        population_size, 
+        generations, 
+        mutation_rate, 
+        crossover_rate):
         print(f"EXPERIMENTO: {experiment_number}")
         
         optimizer = GeneticAlgorithmKnnOptimizer(
