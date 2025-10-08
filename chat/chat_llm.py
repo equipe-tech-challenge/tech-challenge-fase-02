@@ -7,11 +7,15 @@ from joblib import load
 from langchain_openai import ChatOpenAI
 from langchain.prompts import ChatPromptTemplate
 from streamlit_chat import message
+import os
 
 api_key = ""
 client = ChatOpenAI(model="gpt-5", openai_api_key=api_key)
-    
-modelo = load("../data/modelo_classificacaofetal01_20251006_210221.joblib")
+
+# Caminho absoluto para o modelo
+base_dir = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+modelo_path = os.path.join(base_dir, "data", "modelo_classificacaofetal01_20251007_202709.joblib")
+modelo = load(modelo_path)
 
 colunas = [
     "baseline value", "accelerations", "fetal_movement", "uterine_contractions",
@@ -53,35 +57,40 @@ def interpretar(features, resultado):
     Usa prompt engineering para pedir à LLM interpretação médica
     e insights acionáveis com base nos resultados do modelo.
     """
-    medical_prompt = """
-      Você é um assistente médico especializado em saúde fetal.
-      Você deve interpretar resultados de cardiotocografia fetal e gerar um relatório clínico.
+    try:
+        medical_prompt = """
+          Você é um assistente médico especializado em saúde fetal.
+          Você deve interpretar resultados de cardiotocografia fetal e gerar um relatório clínico.
 
-      Dados das medições: {features}
-      Resultado da predição: {resultado} (1: Normal, 2: Suspeito, 3: Patológico)
+          Dados das medições: {features}
+          Resultado da predição: {resultado} (1: Normal, 2: Suspeito, 3: Patológico)
 
-      Por favor, gere:
-      1. Uma explicação clara em linguagem natural.
-      2. Possíveis causas.
-      3. Recomendações médicas.
-      4. Um nível de urgência.
-      5. Aviso de que a classificação pode cometer erros e deve ser avaliada por um profissional.
+          Por favor, gere:
+          1. Uma explicação clara em linguagem natural.
+          2. Possíveis causas.
+          3. Recomendações médicas.
+          4. Um nível de urgência.
+          5. Aviso de que a classificação pode cometer erros e deve ser avaliada por um profissional.
 
-      Responda em formato estruturado JSON com campos:
-      - explicacao
-      - causas
-      - recomendacoes
-      - urgencia
-      - aviso
-      """
+          Responda em formato estruturado JSON com campos:
+          - explicacao
+          - causas
+          - recomendacoes
+          - urgencia
+          - aviso
+          """
 
-    prompt_template = ChatPromptTemplate.from_template(medical_prompt)
-    prompt = prompt_template.format(features=json.dumps(features), resultado=resultado)
+        prompt_template = ChatPromptTemplate.from_template(medical_prompt)
+        prompt = prompt_template.format(features=json.dumps(features), resultado=resultado)
 
-    # Use invoke method instead of chat
-    response = client.invoke(prompt)
+        # Use invoke method instead of chat
+        response = client.invoke(prompt)
 
-    return response.content
+        return response.content
+    except Exception as e:
+        error_msg = f"Erro ao interpretar resultado com LLM: {str(e)}"
+        st.error(error_msg)
+        raise Exception(error_msg) from e
 
 def gerar_valores_aleatorios():
     """
@@ -114,49 +123,59 @@ def gerar_valores_aleatorios():
 def predizer(features):
     """
     Realiza predição usando DataFrame para melhor estruturação dos dados.
-    
+
     Args:
         features: Lista de valores ou dicionário com as features
-        
+
     Returns:
         int: Resultado da predição (1: Normal, 2: Suspeito, 3: Patológico)
     """
-    # Converte features para DataFrame
-    if isinstance(features, list):
-        # Se for lista, cria DataFrame com as colunas definidas
-        df_features = pd.DataFrame([features], columns=colunas)
-    elif isinstance(features, dict):
-        # Se for dicionário, cria DataFrame diretamente
-        df_features = pd.DataFrame([features])
-    else:
-        raise ValueError("Features deve ser uma lista ou dicionário")
-    
-    # Realiza a predição
-    prediction = modelo.predict(df_features)
-    
-    return prediction[0]
+    try:
+        # Converte features para DataFrame
+        if isinstance(features, list):
+            # Se for lista, cria DataFrame com as colunas definidas
+            df_features = pd.DataFrame([features], columns=colunas)
+        elif isinstance(features, dict):
+            # Se for dicionário, cria DataFrame diretamente
+            df_features = pd.DataFrame([features])
+        else:
+            raise ValueError("Features deve ser uma lista ou dicionário")
+
+        # Realiza a predição
+        prediction = modelo.predict(df_features)
+
+        return prediction[0]
+    except Exception as e:
+        error_msg = f"Erro ao realizar predição do modelo: {str(e)}"
+        st.error(error_msg)
+        raise Exception(error_msg) from e
 
 def get_response_from_model(features):
     """
     Processa features e retorna interpretação médica.
-    
+
     Args:
         features: Lista de valores ou dicionário com as features
-        
+
     Returns:
         str: Interpretação médica da predição
     """
-    resultado = predizer(features)
-    
-    # Converte features para dicionário para melhor interpretação
-    if isinstance(features, list):
-        features_dict = dict(zip(colunas, features))
-    else:
-        features_dict = features
-    
-    explicacao = interpretar(features_dict, resultado)
-    salvar_log(features_dict, resultado, explicacao)
-    return explicacao
+    try:
+        resultado = predizer(features)
+
+        # Converte features para dicionário para melhor interpretação
+        if isinstance(features, list):
+            features_dict = dict(zip(colunas, features))
+        else:
+            features_dict = features
+
+        explicacao = interpretar(features_dict, resultado)
+        salvar_log(features_dict, resultado, explicacao)
+        return explicacao
+    except Exception as e:
+        error_msg = f"Erro ao processar a predição: {str(e)}"
+        st.error(error_msg)
+        raise
 
 def salvar_log(features, resultado, explicacao):
     timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
@@ -220,8 +239,13 @@ with st.form("input_form"):
     submitted = st.form_submit_button("Realizar Predição")
 
     if submitted:
-        valores = [entradas[col] for col in colunas]
-        explicacao = get_response_from_model(valores)
+        try:
+            valores = [entradas[col] for col in colunas]
+            explicacao = get_response_from_model(valores)
 
-        st.session_state.past.append(valores)
-        st.session_state.generated.append({"type": "normal", "data": explicacao})
+            st.session_state.past.append(valores)
+            st.session_state.generated.append({"type": "normal", "data": explicacao})
+            st.rerun()
+        except Exception as e:
+            st.error(f"❌ Erro ao realizar predição: {str(e)}")
+            st.exception(e)
