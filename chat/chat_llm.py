@@ -56,6 +56,7 @@ def interpretar(features, resultado, stream_placeholder=None):
     """
     Usa prompt engineering para pedir à LLM interpretação médica
     e insights acionáveis com base nos resultados do modelo.
+    Implementa streaming incremental da resposta.
     """
     try:
         medical_prompt = """
@@ -65,32 +66,49 @@ def interpretar(features, resultado, stream_placeholder=None):
           Dados das medições: {features}
           Resultado da predição: {resultado} (1: Normal, 2: Suspeito, 3: Patológico)
 
-          Por favor, gere:
-          1. Uma explicação clara em linguagem natural.
-          2. Possíveis causas.
-          3. Recomendações médicas.
-          4. Um nível de urgência.
-          5. Aviso de que a classificação pode cometer erros e deve ser avaliada por um profissional.
+          Por favor, gere uma breve análise em texto corrido (NÃO em JSON) com:
 
-          Responda em formato estruturado JSON com campos:
-          - explicacao
-          - causas
-          - recomendacoes
-          - urgencia
-          - aviso
+          **DIAGNÓSTICO**
+          [Explicação clara e breve sobre o resultado]
+
+          **INSIGHT**
+          [Transforma o diagnóstico em um insight acionável para o médico]
           """
 
         prompt_template = ChatPromptTemplate.from_template(medical_prompt)
         prompt = prompt_template.format(features=json.dumps(features), resultado=resultado)
 
-        # Mostra indicador de carregamento se temos placeholder
+        # Se temos placeholder, tenta usar streaming
         if stream_placeholder:
-            stream_placeholder.info("🤖 **Aguardando resposta da IA...**")
+            try:
+                # Tenta streaming (requer organização verificada)
+                full_response = ""
 
-        # Usa invoke sem streaming (streaming requer verificação da organização)
-        response = client.invoke(prompt)
+                for chunk in client.stream(prompt):
+                    if hasattr(chunk, 'content') and chunk.content:
+                        full_response += chunk.content
+                        # Atualiza em tempo real com o texto acumulado
+                        stream_placeholder.markdown(full_response + " ▌")
 
-        return response.content
+                # Remove o cursor ao finalizar
+                stream_placeholder.markdown(full_response)
+                return full_response
+
+            except Exception as stream_error:
+                # Se streaming falhar (organização não verificada), usa invoke
+                if "stream" in str(stream_error).lower() or "unsupported" in str(stream_error).lower():
+                    stream_placeholder.info("🤖 **Aguardando resposta da IA...**")
+                    response = client.invoke(prompt)
+                    # Mostra a resposta completa
+                    stream_placeholder.markdown(response.content)
+                    return response.content
+                else:
+                    raise stream_error
+        else:
+            # Sem placeholder, usa invoke direto
+            response = client.invoke(prompt)
+            return response.content
+
     except Exception as e:
         error_msg = f"Erro ao interpretar resultado com LLM: {str(e)}"
         st.error(error_msg)
@@ -154,13 +172,13 @@ def predizer(features):
         st.error(error_msg)
         raise Exception(error_msg) from e
 
-def formatar_resposta(resultado, explicacao_json):
+def formatar_resposta(resultado, texto_resposta):
     """
     Formata a resposta de forma legível e estruturada seguindo boas práticas de UX.
 
     Args:
         resultado: int - Resultado da predição (1: Normal, 2: Suspeito, 3: Patológico)
-        explicacao_json: str - JSON com a interpretação médica
+        texto_resposta: str - Texto com a interpretação médica
 
     Returns:
         dict: Dicionário com dados formatados
@@ -194,22 +212,42 @@ def formatar_resposta(resultado, explicacao_json):
         "descricao": "Resultado não identificado"
     })
 
-    try:
-        # Tenta fazer parse do JSON
-        explicacao = json.loads(explicacao_json)
-    except:
-        # Se não for JSON válido, cria estrutura básica
-        explicacao = {
-            "explicacao": explicacao_json,
-            "causas": "Não disponível",
-            "recomendacoes": "Consulte um profissional de saúde",
-            "urgencia": "Indeterminada",
-            "aviso": "Esta análise é automatizada e deve ser avaliada por um profissional de saúde."
-        }
+    # Extrai seções do texto usando marcadores
+    import re
+
+    def extrair_secao(texto, inicio, fim=None):
+        """Extrai uma seção do texto entre dois marcadores"""
+        padrao_inicio = re.escape(inicio)
+        if fim:
+            padrao_fim = re.escape(fim)
+            padrao = f"{padrao_inicio}(.*?)(?:{padrao_fim}|$)"
+        else:
+            padrao = f"{padrao_inicio}(.*?)$"
+
+        match = re.search(padrao, texto, re.DOTALL | re.IGNORECASE)
+        if match:
+            return match.group(1).strip()
+        return ""
+
+    explicacao_secoes = {
+        "diagnostico": extrair_secao(texto_resposta, "**DIAGNÓSTICO**", "**INSIGHT**") or
+                       extrair_secao(texto_resposta, "DIAGNÓSTICO", "INSIGHT") or
+                       "Análise em andamento...",
+        "INSIGHT": extrair_secao(texto_resposta, "**INSIGHT**", "**RECOMENDAÇÕES MÉDICAS**") or
+                    extrair_secao(texto_resposta, "INSIGHT") or
+                    "Sem resultados disponíveis.",
+        "aviso": "AVISO IMPORTANTE Esta é uma análise automatizada por IA e não substitui "
+        "a avaliação clínica. A interpretação definitiva deve considerar idade gestacional, "
+        "sinais maternos, qualidade do traçado e contexto obstétrico, sendo o diagnóstico final "
+        "de responsabilidade do médico assistente. Em caso de sintomas maternos, redução de "
+        "movimentos fetais ou fatores de risco, recomenda-se reavaliação clínica e,"
+        " se necessário, repetição do CTG e exames complementares."
+    }
 
     return {
         "resultado": info_resultado,
-        "explicacao": explicacao
+        "explicacao": explicacao_secoes,
+        "texto_completo": texto_resposta
     }
 
 def get_response_from_model(features, stream_placeholder=None):
@@ -298,78 +336,53 @@ if submitted:
     try:
         valores = [entradas[col] for col in colunas]
 
-        # Indicadores de progresso
-        progress_container = st.container()
-        with progress_container:
-            status_text = st.empty()
-            status_text.info("📊 Preparando dados para análise...")
+        # Status de preparação
+        status_text = st.empty()
+        status_text.info("📊 Preparando dados para análise...")
 
-            status_text.info("🤖 Executando modelo de predição...")
+        # Executa modelo de predição
+        status_text.info("🤖 Executando modelo de predição...")
 
-            # Container para streaming
-            status_text.info("🧠 Gerando interpretação médica com IA...")
-            stream_container = st.empty()
+        # Converte features para dicionário
+        if isinstance(valores, list):
+            features_dict = dict(zip(colunas, valores))
+        else:
+            features_dict = valores
 
-            # Executa a predição com streaming
-            resultado, explicacao_json = get_response_from_model(valores, stream_container)
+        # Realiza predição
+        resultado = predizer(valores)
 
-            # Limpa o status
-            status_text.empty()
-            stream_container.empty()
+        # Limpa status e mostra título
+        status_text.empty()
 
-        # Formata a resposta
-        dados_formatados = formatar_resposta(resultado, explicacao_json)
-        info_resultado = dados_formatados['resultado']
-        explicacao = dados_formatados['explicacao']
-
-        # Exibe resultado formatado
-        st.success("✅ Análise concluída com sucesso!")
+        # Mapeamento de resultados para exibir enquanto gera
+        resultado_map = {
+            1: ("Normal", "🟢", "Os parâmetros fetais estão dentro da normalidade"),
+            2: ("Suspeito", "🟡", "Alguns parâmetros fetais requerem atenção"),
+            3: ("Patológico", "🔴", "Parâmetros fetais indicam necessidade de intervenção")
+        }
+        status, emoji, descricao = resultado_map.get(resultado, ("Desconhecido", "⚪", "Resultado não identificado"))
 
         # Cabeçalho do resultado
-        st.markdown(f"## {info_resultado['emoji']} Diagnóstico: **{info_resultado['status']}**")
-        st.caption(info_resultado['descricao'])
-
+        st.markdown(f"## {emoji} Diagnóstico: **{status}**")
+        st.caption(descricao)
         st.markdown("---")
 
-        # Explicação
-        with st.container():
-            st.markdown("### 📋 Explicação do Resultado")
-            st.write(explicacao.get('explicacao', 'Não disponível'))
+        # Container para streaming em tempo real - AGORA VISÍVEL!
+        st.markdown("### 🤖 Análise Médica Detalhada")
+        stream_container = st.empty()
 
-        st.markdown("")
+        # Executa interpretação com streaming REAL
+        explicacao_texto = interpretar(features_dict, resultado, stream_container)
 
-        # Possíveis Causas
-        with st.container():
-            st.markdown("### 🔍 Possíveis Causas")
-            st.write(explicacao.get('causas', 'Não disponível'))
+        # Salva log
+        salvar_log(features_dict, resultado, explicacao_texto)
 
-        st.markdown("")
+        # Formata a resposta para histórico
+        dados_formatados = formatar_resposta(resultado, explicacao_texto)
 
-        # Recomendações
-        with st.container():
-            st.markdown("### 💊 Recomendações Médicas")
-            st.write(explicacao.get('recomendacoes', 'Não disponível'))
-
-        st.markdown("")
-
-        # Nível de Urgência
-        urgencia = explicacao.get('urgencia', 'Não disponível')
-        with st.container():
-            st.markdown("### ⚡ Nível de Urgência")
-
-            # Define a cor baseada no nível de urgência
-            if any(palavra in urgencia.lower() for palavra in ['alta', 'urgente', 'imediata', 'crítica']):
-                st.error(f"**{urgencia}**")
-            elif any(palavra in urgencia.lower() for palavra in ['média', 'moderada', 'atenção']):
-                st.warning(f"**{urgencia}**")
-            else:
-                st.info(f"**{urgencia}**")
-
-        st.markdown("")
-
-        # Aviso
-        with st.container():
-            st.warning(f"⚠️ **Aviso Importante**\n\n{explicacao.get('aviso', 'Esta análise é automatizada e deve ser avaliada por um profissional de saúde.')}")
+        # Exibe mensagem de sucesso
+        st.success("✅ Análise concluída com sucesso!")
 
         # Salva no histórico
         st.session_state.historico.append({
@@ -397,7 +410,7 @@ elif len(st.session_state.historico) > 0:
 
     with st.container():
         st.markdown("### 📋 Explicação do Resultado")
-        st.write(explicacao.get('explicacao', 'Não disponível'))
+        st.write(explicacao.get('diagnostico', 'Não disponível'))
     st.markdown("")
 
     with st.container():
@@ -434,7 +447,7 @@ elif len(st.session_state.historico) > 0:
                 exp_hist = dados_hist['explicacao']
 
                 st.markdown(f"#### Análise #{len(st.session_state.historico) - i - 1} - {info_hist['emoji']} {info_hist['status']}")
-                st.write(f"**Explicação:** {exp_hist.get('explicacao', 'Não disponível')}")
+                st.write(f"**Explicação:** {exp_hist.get('diagnostico', 'Não disponível')}")
                 st.write(f"**Urgência:** {exp_hist.get('urgencia', 'Não disponível')}")
                 st.markdown("---")
 else:
