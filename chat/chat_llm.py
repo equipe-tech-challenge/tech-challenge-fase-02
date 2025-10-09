@@ -31,11 +31,11 @@ colunas = [
 valores_exemplo = {
     "baseline value": 132.0,
     "accelerations": 0.003,
-    "fetal_movement": 0.0,
+    "fetal_movement": 0.01,
     "uterine_contractions": 0.008,
     "light_decelerations": 0.003,
-    "severe_decelerations": 0.0,
-    "prolongued_decelerations": 0.0,
+    "severe_decelerations": 0.01,
+    "prolongued_decelerations": 0.01,
     "abnormal_short_term_variability": 16.0,
     "mean_value_of_short_term_variability": 2.1,
     "percentage_of_time_with_abnormal_long_term_variability": 0.0,
@@ -52,10 +52,11 @@ valores_exemplo = {
     "histogram_tendency": 0.0
 }
 
-def interpretar(features, resultado):
+def interpretar(features, resultado, stream_placeholder=None):
     """
     Usa prompt engineering para pedir à LLM interpretação médica
     e insights acionáveis com base nos resultados do modelo.
+    Implementa streaming incremental da resposta.
     """
     try:
         medical_prompt = """
@@ -65,28 +66,49 @@ def interpretar(features, resultado):
           Dados das medições: {features}
           Resultado da predição: {resultado} (1: Normal, 2: Suspeito, 3: Patológico)
 
-          Por favor, gere:
-          1. Uma explicação clara em linguagem natural.
-          2. Possíveis causas.
-          3. Recomendações médicas.
-          4. Um nível de urgência.
-          5. Aviso de que a classificação pode cometer erros e deve ser avaliada por um profissional.
+          Por favor, gere uma breve análise em texto corrido (NÃO em JSON) com:
 
-          Responda em formato estruturado JSON com campos:
-          - explicacao
-          - causas
-          - recomendacoes
-          - urgencia
-          - aviso
+          **DIAGNÓSTICO**
+          [Explicação clara e breve sobre o resultado]
+
+          **INSIGHT**
+          [Transforma o diagnóstico em um insight acionável para o médico]
           """
 
         prompt_template = ChatPromptTemplate.from_template(medical_prompt)
         prompt = prompt_template.format(features=json.dumps(features), resultado=resultado)
 
-        # Use invoke method instead of chat
-        response = client.invoke(prompt)
+        # Se temos placeholder, tenta usar streaming
+        if stream_placeholder:
+            try:
+                # Tenta streaming (requer organização verificada)
+                full_response = ""
 
-        return response.content
+                for chunk in client.stream(prompt):
+                    if hasattr(chunk, 'content') and chunk.content:
+                        full_response += chunk.content
+                        # Atualiza em tempo real com o texto acumulado
+                        stream_placeholder.markdown(full_response + " ▌")
+
+                # Remove o cursor ao finalizar
+                stream_placeholder.markdown(full_response)
+                return full_response
+
+            except Exception as stream_error:
+                # Se streaming falhar (organização não verificada), usa invoke
+                if "stream" in str(stream_error).lower() or "unsupported" in str(stream_error).lower():
+                    stream_placeholder.info("🤖 **Aguardando resposta da IA...**")
+                    response = client.invoke(prompt)
+                    # Mostra a resposta completa
+                    stream_placeholder.markdown(response.content)
+                    return response.content
+                else:
+                    raise stream_error
+        else:
+            # Sem placeholder, usa invoke direto
+            response = client.invoke(prompt)
+            return response.content
+
     except Exception as e:
         error_msg = f"Erro ao interpretar resultado com LLM: {str(e)}"
         st.error(error_msg)
@@ -150,15 +172,94 @@ def predizer(features):
         st.error(error_msg)
         raise Exception(error_msg) from e
 
-def get_response_from_model(features):
+def formatar_resposta(resultado, texto_resposta):
+    """
+    Formata a resposta de forma legível e estruturada seguindo boas práticas de UX.
+
+    Args:
+        resultado: int - Resultado da predição (1: Normal, 2: Suspeito, 3: Patológico)
+        texto_resposta: str - Texto com a interpretação médica
+
+    Returns:
+        dict: Dicionário com dados formatados
+    """
+    # Mapeamento de resultados
+    resultado_map = {
+        1: {
+            "status": "Normal",
+            "emoji": "🟢",
+            "cor": "success",
+            "descricao": "Os parâmetros fetais estão dentro da normalidade"
+        },
+        2: {
+            "status": "Suspeito",
+            "emoji": "🟡",
+            "cor": "warning",
+            "descricao": "Alguns parâmetros fetais requerem atenção"
+        },
+        3: {
+            "status": "Patológico",
+            "emoji": "🔴",
+            "cor": "error",
+            "descricao": "Parâmetros fetais indicam necessidade de intervenção"
+        }
+    }
+
+    info_resultado = resultado_map.get(resultado, {
+        "status": "Desconhecido",
+        "emoji": "⚪",
+        "cor": "info",
+        "descricao": "Resultado não identificado"
+    })
+
+    # Extrai seções do texto usando marcadores
+    import re
+
+    def extrair_secao(texto, inicio, fim=None):
+        """Extrai uma seção do texto entre dois marcadores"""
+        padrao_inicio = re.escape(inicio)
+        if fim:
+            padrao_fim = re.escape(fim)
+            padrao = f"{padrao_inicio}(.*?)(?:{padrao_fim}|$)"
+        else:
+            padrao = f"{padrao_inicio}(.*?)$"
+
+        match = re.search(padrao, texto, re.DOTALL | re.IGNORECASE)
+        if match:
+            return match.group(1).strip()
+        return ""
+
+    explicacao_secoes = {
+        "diagnostico": extrair_secao(texto_resposta, "**DIAGNÓSTICO**", "**INSIGHT**") or
+                       extrair_secao(texto_resposta, "DIAGNÓSTICO", "INSIGHT") or
+                       "Análise em andamento...",
+        "INSIGHT": extrair_secao(texto_resposta, "**INSIGHT**", "**RECOMENDAÇÕES MÉDICAS**") or
+                    extrair_secao(texto_resposta, "INSIGHT") or
+                    "Sem resultados disponíveis.",
+        "aviso": "AVISO IMPORTANTE Esta é uma análise automatizada por IA e não substitui "
+        "a avaliação clínica. A interpretação definitiva deve considerar idade gestacional, "
+        "sinais maternos, qualidade do traçado e contexto obstétrico, sendo o diagnóstico final "
+        "de responsabilidade do médico assistente. Em caso de sintomas maternos, redução de "
+        "movimentos fetais ou fatores de risco, recomenda-se reavaliação clínica e,"
+        " se necessário, repetição do CTG e exames complementares."
+    }
+
+    return {
+        "resultado": info_resultado,
+        "explicacao": explicacao_secoes,
+        "texto_completo": texto_resposta
+    }
+
+def get_response_from_model(features, stream_placeholder=None):
     """
     Processa features e retorna interpretação médica.
 
     Args:
         features: Lista de valores ou dicionário com as features
+        stream_placeholder: Container para streaming da resposta
 
     Returns:
-        str: Interpretação médica da predição
+        tuple: (resultado, explicacao_json)
     """
     try:
         resultado = predizer(features)
@@ -169,9 +270,10 @@ def get_response_from_model(features):
         else:
             features_dict = features
 
-        explicacao = interpretar(features_dict, resultado)
-        salvar_log(features_dict, resultado, explicacao)
-        return explicacao
+        explicacao_json = interpretar(features_dict, resultado, stream_placeholder)
+
+        salvar_log(features_dict, resultado, explicacao_json)
+        return resultado, explicacao_json
     except Exception as e:
         error_msg = f"Erro ao processar a predição: {str(e)}"
         st.error(error_msg)
@@ -188,64 +290,165 @@ def salvar_log(features, resultado, explicacao):
     with open("log_interpretacoes.jsonl", "a") as f:
         f.write(json.dumps(log) + "\n")
 
-def on_input_change():
-    user_input = st.session_state.user_input
-    response_text = get_response_from_model(user_input)
-    st.session_state.past.append(user_input)
-    st.session_state.generated.append({"type": "normal", "data": response_text})
+st.session_state.setdefault('historico', [])
 
-def on_btn_click():
-    del st.session_state.past[:]
-    del st.session_state.generated[:]
-
-st.session_state.setdefault('past', [])
-st.session_state.setdefault('generated', [])
-
-st.title("Chat de Avaliação da Saúde Fetal")
-
-chat_placeholder = st.empty()
-
-with chat_placeholder.container():
-    for i in range(len(st.session_state['generated'])):
-        message(st.session_state['past'][i], is_user=True, key=f"{i}_user")
-        message(
-            st.session_state['generated'][i]['data'],
-            key=f"{i}",
-            allow_html=True,
-            is_table=False
-        )
-
-    st.button("Limpar histórico", on_click=on_btn_click)
+st.title("🏥 Chat de Avaliação da Saúde Fetal")
+st.markdown("---")
 
 with st.form("input_form"):
-    st.write("Preencha os dados da cardiotocografia:")
-    
+    st.subheader("📋 Dados da Cardiotocografia")
+
     # Botão para gerar valores aleatórios
-    col1, col2 = st.columns(2)
+    col1, col2 = st.columns([1, 3])
     with col1:
         if st.form_submit_button("🎲 Gerar Valores Aleatórios", type="secondary"):
             valores_aleatorios = gerar_valores_aleatorios()
             st.session_state.valores_aleatorios = valores_aleatorios
+            st.rerun()
 
     # Inicializa valores aleatórios se não existirem
     if 'valores_aleatorios' not in st.session_state:
         st.session_state.valores_aleatorios = valores_exemplo
 
+    st.markdown("---")
+
+    # Organiza inputs em colunas para melhor visualização
+    col1, col2 = st.columns(2)
     entradas = {}
-    for col in colunas:
+
+    for idx, col in enumerate(colunas):
         valor_atual = st.session_state.valores_aleatorios.get(col, valores_exemplo[col])
-        entradas[col] = st.number_input(col, value=valor_atual)
+        if idx % 2 == 0:
+            with col1:
+                entradas[col] = st.number_input(col, value=valor_atual, key=f"input_{col}")
+        else:
+            with col2:
+                entradas[col] = st.number_input(col, value=valor_atual, key=f"input_{col}")
 
-    submitted = st.form_submit_button("Realizar Predição")
+    st.markdown("---")
+    submitted = st.form_submit_button("🔬 Realizar Predição", use_container_width=True, type="primary")
 
-    if submitted:
-        try:
-            valores = [entradas[col] for col in colunas]
-            explicacao = get_response_from_model(valores)
+# Área de resultados (fora do formulário)
+st.markdown("---")
+st.subheader("📊 Resultados da Análise")
 
-            st.session_state.past.append(valores)
-            st.session_state.generated.append({"type": "normal", "data": explicacao})
-            st.rerun()
-        except Exception as e:
-            st.error(f"❌ Erro ao realizar predição: {str(e)}")
+if submitted:
+    try:
+        valores = [entradas[col] for col in colunas]
+
+        # Status de preparação
+        status_text = st.empty()
+        status_text.info("📊 Preparando dados para análise...")
+
+        # Executa modelo de predição
+        status_text.info("🤖 Executando modelo de predição...")
+
+        # Converte features para dicionário
+        if isinstance(valores, list):
+            features_dict = dict(zip(colunas, valores))
+        else:
+            features_dict = valores
+
+        # Realiza predição
+        resultado = predizer(valores)
+
+        # Limpa status e mostra título
+        status_text.empty()
+
+        # Mapeamento de resultados para exibir enquanto gera
+        resultado_map = {
+            1: ("Normal", "🟢", "Os parâmetros fetais estão dentro da normalidade"),
+            2: ("Suspeito", "🟡", "Alguns parâmetros fetais requerem atenção"),
+            3: ("Patológico", "🔴", "Parâmetros fetais indicam necessidade de intervenção")
+        }
+        status, emoji, descricao = resultado_map.get(resultado, ("Desconhecido", "⚪", "Resultado não identificado"))
+
+        # Cabeçalho do resultado
+        st.markdown(f"## {emoji} Diagnóstico: **{status}**")
+        st.caption(descricao)
+        st.markdown("---")
+
+        # Container para streaming em tempo real - AGORA VISÍVEL!
+        st.markdown("### 🤖 Análise Médica Detalhada")
+        stream_container = st.empty()
+
+        # Executa interpretação com streaming REAL
+        explicacao_texto = interpretar(features_dict, resultado, stream_container)
+
+        # Salva log
+        salvar_log(features_dict, resultado, explicacao_texto)
+
+        # Formata a resposta para histórico
+        dados_formatados = formatar_resposta(resultado, explicacao_texto)
+
+        # Exibe mensagem de sucesso
+        st.success("✅ Análise concluída com sucesso!")
+
+        # Salva no histórico
+        st.session_state.historico.append({
+            'valores': valores,
+            'resultado': resultado,
+            'dados_formatados': dados_formatados
+        })
+
+    except Exception as e:
+        st.error(f"❌ Erro ao realizar predição: {str(e)}")
+        with st.expander("📋 Detalhes do erro"):
             st.exception(e)
+
+# Mostra histórico se existir
+elif len(st.session_state.historico) > 0:
+    ultimo_item = st.session_state.historico[-1]
+    dados = ultimo_item['dados_formatados']
+    info_resultado = dados['resultado']
+    explicacao = dados['explicacao']
+
+    # Exibe o último resultado
+    st.markdown(f"## {info_resultado['emoji']} Diagnóstico: **{info_resultado['status']}**")
+    st.caption(info_resultado['descricao'])
+    st.markdown("---")
+
+    with st.container():
+        st.markdown("### 📋 Explicação do Resultado")
+        st.write(explicacao.get('diagnostico', 'Não disponível'))
+    st.markdown("")
+
+    with st.container():
+        st.markdown("### 🔍 Possíveis Causas")
+        st.write(explicacao.get('causas', 'Não disponível'))
+    st.markdown("")
+
+    with st.container():
+        st.markdown("### 💊 Recomendações Médicas")
+        st.write(explicacao.get('recomendacoes', 'Não disponível'))
+    st.markdown("")
+
+    urgencia = explicacao.get('urgencia', 'Não disponível')
+    with st.container():
+        st.markdown("### ⚡ Nível de Urgência")
+        if any(palavra in urgencia.lower() for palavra in ['alta', 'urgente', 'imediata', 'crítica']):
+            st.error(f"**{urgencia}**")
+        elif any(palavra in urgencia.lower() for palavra in ['média', 'moderada', 'atenção']):
+            st.warning(f"**{urgencia}**")
+        else:
+            st.info(f"**{urgencia}**")
+    st.markdown("")
+
+    with st.container():
+        st.warning(f"⚠️ **Aviso Importante**\n\n{explicacao.get('aviso', 'Esta análise é automatizada e deve ser avaliada por um profissional de saúde.')}")
+
+    # Mostra histórico anterior
+    if len(st.session_state.historico) > 1:
+        st.markdown("---")
+        with st.expander(f"📜 Ver histórico ({len(st.session_state.historico) - 1} análises anteriores)"):
+            for i, item in enumerate(reversed(st.session_state.historico[:-1])):
+                dados_hist = item['dados_formatados']
+                info_hist = dados_hist['resultado']
+                exp_hist = dados_hist['explicacao']
+
+                st.markdown(f"#### Análise #{len(st.session_state.historico) - i - 1} - {info_hist['emoji']} {info_hist['status']}")
+                st.write(f"**Explicação:** {exp_hist.get('diagnostico', 'Não disponível')}")
+                st.write(f"**Urgência:** {exp_hist.get('urgencia', 'Não disponível')}")
+                st.markdown("---")
+else:
+    st.info("👆 Preencha os dados acima e clique em 'Realizar Predição' para começar a análise.")
