@@ -42,11 +42,6 @@ env/
 .DS_Store
 Thumbs.db
 
-# Logs
-*.log
-log_interpretacoes.jsonl
-
 # Data files
-*.joblib
 *.pkl
 *.pickle
