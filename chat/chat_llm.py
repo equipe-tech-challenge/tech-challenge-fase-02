@@ -12,7 +12,6 @@ import os
 api_key = ""
 client = ChatOpenAI(model="gpt-5", openai_api_key=api_key)
 
-# Caminho absoluto para o modelo
 base_dir = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 modelo_path = os.path.join(base_dir, "data", "modelo_classificacaofetal01_20251007_202709.joblib")
 modelo = load(modelo_path)
@@ -27,7 +26,6 @@ colunas = [
     "histogram_mean", "histogram_median", "histogram_variance", "histogram_tendency"
 ]
 
-# Valores de exemplo baseados nos dados reais para inicialização dos inputs
 valores_exemplo = {
     "baseline value": 134.0,
     "accelerations": 0.001,
@@ -53,11 +51,6 @@ valores_exemplo = {
 }
 
 def interpretar(features, resultado, stream_placeholder=None):
-    """
-    Usa prompt engineering para pedir à LLM interpretação médica
-    e insights acionáveis com base nos resultados do modelo.
-    Implementa streaming incremental da resposta.
-    """
     try:
         medical_prompt = """
           Você é um assistente médico especializado em saúde fetal.
@@ -78,34 +71,27 @@ def interpretar(features, resultado, stream_placeholder=None):
         prompt_template = ChatPromptTemplate.from_template(medical_prompt)
         prompt = prompt_template.format(features=json.dumps(features), resultado=resultado)
 
-        # Se temos placeholder, tenta usar streaming
         if stream_placeholder:
             try:
-                # Tenta streaming (requer organização verificada)
                 full_response = ""
 
                 for chunk in client.stream(prompt):
                     if hasattr(chunk, 'content') and chunk.content:
                         full_response += chunk.content
-                        # Atualiza em tempo real com o texto acumulado
                         stream_placeholder.markdown(full_response + " ▌")
 
-                # Remove o cursor ao finalizar
                 stream_placeholder.markdown(full_response)
                 return full_response
 
             except Exception as stream_error:
-                # Se streaming falhar (organização não verificada), usa invoke
                 if "stream" in str(stream_error).lower() or "unsupported" in str(stream_error).lower():
                     stream_placeholder.info("🤖 **Aguardando resposta da IA...**")
                     response = client.invoke(prompt)
-                    # Mostra a resposta completa
                     stream_placeholder.markdown(response.content)
                     return response.content
                 else:
                     raise stream_error
         else:
-            # Sem placeholder, usa invoke direto
             response = client.invoke(prompt)
             return response.content
 
@@ -115,9 +101,6 @@ def interpretar(features, resultado, stream_placeholder=None):
         raise Exception(error_msg) from e
 
 def gerar_valores_aleatorios():
-    """
-    Gera valores aleatórios baseados nas estatísticas dos dados reais.
-    """
     return {
         "baseline value": np.random.normal(132.0, 15.0),
         "accelerations": np.random.exponential(0.005),
@@ -143,27 +126,14 @@ def gerar_valores_aleatorios():
     }
 
 def predizer(features):
-    """
-    Realiza predição usando DataFrame para melhor estruturação dos dados.
-
-    Args:
-        features: Lista de valores ou dicionário com as features
-
-    Returns:
-        int: Resultado da predição (1: Normal, 2: Suspeito, 3: Patológico)
-    """
     try:
-        # Converte features para DataFrame
         if isinstance(features, list):
-            # Se for lista, cria DataFrame com as colunas definidas
             df_features = pd.DataFrame([features], columns=colunas)
         elif isinstance(features, dict):
-            # Se for dicionário, cria DataFrame diretamente
             df_features = pd.DataFrame([features])
         else:
             raise ValueError("Features deve ser uma lista ou dicionário")
 
-        # Realiza a predição
         prediction = modelo.predict(df_features)
 
         return prediction[0]
@@ -173,17 +143,6 @@ def predizer(features):
         raise Exception(error_msg) from e
 
 def formatar_resposta(resultado, texto_resposta):
-    """
-    Formata a resposta de forma legível e estruturada seguindo boas práticas de UX.
-
-    Args:
-        resultado: int - Resultado da predição (1: Normal, 2: Suspeito, 3: Patológico)
-        texto_resposta: str - Texto com a interpretação médica
-
-    Returns:
-        dict: Dicionário com dados formatados
-    """
-    # Mapeamento de resultados
     resultado_map = {
         1: {
             "status": "Normal",
@@ -212,7 +171,6 @@ def formatar_resposta(resultado, texto_resposta):
         "descricao": "Resultado não identificado"
     })
 
-    # Extrai seções do texto usando marcadores
     import re
 
     def extrair_secao(texto, inicio, fim=None):
@@ -251,20 +209,9 @@ def formatar_resposta(resultado, texto_resposta):
     }
 
 def get_response_from_model(features, stream_placeholder=None):
-    """
-    Processa features e retorna interpretação médica.
-
-    Args:
-        features: Lista de valores ou dicionário com as features
-        stream_placeholder: Container para streaming da resposta
-
-    Returns:
-        tuple: (resultado, explicacao_json)
-    """
     try:
         resultado = predizer(features)
 
-        # Converte features para dicionário para melhor interpretação
         if isinstance(features, list):
             features_dict = dict(zip(colunas, features))
         else:
@@ -298,7 +245,6 @@ st.markdown("---")
 with st.form("input_form"):
     st.subheader("📋 Dados da Cardiotocografia")
 
-    # Botão para gerar valores aleatórios
     col1, col2 = st.columns([1, 3])
     with col1:
         if st.form_submit_button("🎲 Gerar Valores Aleatórios", type="secondary"):
@@ -306,13 +252,11 @@ with st.form("input_form"):
             st.session_state.valores_aleatorios = valores_aleatorios
             st.rerun()
 
-    # Inicializa valores aleatórios se não existirem
     if 'valores_aleatorios' not in st.session_state:
         st.session_state.valores_aleatorios = valores_exemplo
 
     st.markdown("---")
 
-    # Organiza inputs em colunas para melhor visualização
     col1, col2 = st.columns(2)
     entradas = {}
 
@@ -328,7 +272,6 @@ with st.form("input_form"):
     st.markdown("---")
     submitted = st.form_submit_button("🔬 Realizar Predição", use_container_width=True, type="primary")
 
-# Área de resultados (fora do formulário)
 st.markdown("---")
 st.subheader("📊 Resultados da Análise")
 
@@ -336,26 +279,20 @@ if submitted:
     try:
         valores = [entradas[col] for col in colunas]
 
-        # Status de preparação
         status_text = st.empty()
         status_text.info("📊 Preparando dados para análise...")
 
-        # Executa modelo de predição
         status_text.info("🤖 Executando modelo de predição...")
 
-        # Converte features para dicionário
         if isinstance(valores, list):
             features_dict = dict(zip(colunas, valores))
         else:
             features_dict = valores
 
-        # Realiza predição
         resultado = predizer(valores)
 
-        # Limpa status e mostra título
         status_text.empty()
 
-        # Mapeamento de resultados para exibir enquanto gera
         resultado_map = {
             1: ("Normal", "🟢", "Os parâmetros fetais estão dentro da normalidade"),
             2: ("Suspeito", "🟡", "Alguns parâmetros fetais requerem atenção"),
@@ -363,28 +300,21 @@ if submitted:
         }
         status, emoji, descricao = resultado_map.get(resultado, ("Desconhecido", "⚪", "Resultado não identificado"))
 
-        # Cabeçalho do resultado
         st.markdown(f"## {emoji} Diagnóstico: **{status}**")
         st.caption(descricao)
         st.markdown("---")
 
-        # Container para streaming em tempo real - AGORA VISÍVEL!
         st.markdown("### 🤖 Análise Médica Detalhada")
         stream_container = st.empty()
 
-        # Executa interpretação com streaming REAL
         explicacao_texto = interpretar(features_dict, resultado, stream_container)
 
-        # Salva log
         salvar_log(features_dict, resultado, explicacao_texto)
 
-        # Formata a resposta para histórico
         dados_formatados = formatar_resposta(resultado, explicacao_texto)
 
-        # Exibe mensagem de sucesso
         st.success("✅ Análise concluída com sucesso!")
 
-        # Salva no histórico
         st.session_state.historico.append({
             'valores': valores,
             'resultado': resultado,
@@ -396,14 +326,12 @@ if submitted:
         with st.expander("📋 Detalhes do erro"):
             st.exception(e)
 
-# Mostra histórico se existir
 elif len(st.session_state.historico) > 0:
     ultimo_item = st.session_state.historico[-1]
     dados = ultimo_item['dados_formatados']
     info_resultado = dados['resultado']
     explicacao = dados['explicacao']
 
-    # Exibe o último resultado
     st.markdown(f"## {info_resultado['emoji']} Diagnóstico: **{info_resultado['status']}**")
     st.caption(info_resultado['descricao'])
     st.markdown("---")
@@ -437,7 +365,6 @@ elif len(st.session_state.historico) > 0:
     with st.container():
         st.warning(f"⚠️ **Aviso Importante**\n\n{explicacao.get('aviso', 'Esta análise é automatizada e deve ser avaliada por um profissional de saúde.')}")
 
-    # Mostra histórico anterior
     if len(st.session_state.historico) > 1:
         st.markdown("---")
         with st.expander(f"📜 Ver histórico ({len(st.session_state.historico) - 1} análises anteriores)"):
