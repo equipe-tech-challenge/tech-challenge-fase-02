@@ -66,6 +66,10 @@ A interface permite:
 └── requirements.txt               # Dependências
 ```
 
+## Video de demonstração
+
+https://www.youtube.com/watch?v=bEe3iXwZSy0
+
 ## Equipe
 
 - **Bruna Cardoso Andrade** - RM366295
